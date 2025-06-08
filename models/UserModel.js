@@ -12,6 +12,14 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+
+    //Strore all active refreshh tokens for this user.
+    // By persisting them we can revoke or rotate later
+
+    refreshTokens: {
+        type: [String],
+        default: []
+    }
 });
 
 module.exports = mongoose.model("UserModel", userSchema);

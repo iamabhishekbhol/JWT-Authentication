@@ -1,6 +1,10 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const { generateToken } = require("../utils/jwt");
+const {
+  generateToken,
+  verifyRefreshToken,
+  refreshToken,
+} = require("../utils/jwt");
 const authenticateToken = require("../middleware/authMiddleware");
 // const user = require("../config/user");
 const UserModel = require("../models/UserModel");
@@ -95,12 +99,108 @@ router.post("/login", loginValidation, validateRequest, async (req, res) => {
   }
 
   // Step 3: Generate and send token
-  const token = generateToken(user);
+  const accessToken = generateToken(user);
+
+  //  persist new access token in db
+  const newRefreshToken = refreshToken(user);
+  
+  user.refreshTokens.push(newRefreshToken);
+  await user.save();
+
   res.json({
     message: "Login successful",
-    token,
+    accessToken: accessToken,
+    refreshToken: newRefreshToken,
   });
 });
+
+// Token rotation
+// Client sends a valid refreshToken -> we verify, rotate it, and return a fresh accessToken and refreshToken
+
+router.post("/token", async (req, res) => {
+  const { token: incomingRequestToken } = req.body;
+
+  // 1) Ensure token was sent
+
+  if (!incomingRequestToken) {
+    return res.status(401).json({ error: "Refresh token required" });
+  }
+
+  let payload;
+
+  try {
+    // 2) verify signature and expiry
+    payload = verifyRefreshToken(incomingRequestToken);
+  } catch (err) {
+    return res.status(403).json({ error: "Invalid refresh token" });
+  }
+
+  // 3) Load user and confirm if the token is still active
+
+  const user =  await UserModel.findById(payload.id);
+  if(!user || !user.refreshTokens.includes(incomingRequestToken)){
+    return res.status(403).json({
+      error: "refresh token revoked or not found"
+    });
+  }
+
+  // 4) rotate: remove old, create and persist new
+
+  user.refreshTokens = user.refreshTokens.filter(checktoken => checktoken !== incomingRequestToken); // -> removing the old token from the array
+
+  const newRefreshToken = refreshToken(user);
+  user.refreshTokens.push(newRefreshToken)
+
+  await user.save();
+
+  // 5) Issue a new accessToken -> rather than asking user to Login again, we can give this new accessToken to FE so it can use it for the protected routes without logging out
+
+  const newAccessToken = generateToken(user);
+  res.json({
+    accessToken: newAccessToken,
+    refreshToken: newRefreshToken
+  })
+
+});
+
+
+// Logout
+// Client calls their refreshToken -> we remove it from the DB (client saves the refresh token usually in localStorage or HTTPOnly cookie)
+
+router.post('/logout', async (req, res) => {
+  const { token: refreshTokenRevoke} = req.body;
+
+  if(!refreshTokenRevoke){
+    return res.status(400).json({
+      error: "Refresh token required"
+    });
+  }
+
+  // Find the user who owns this token
+  const user = await UserModel.findOne({refreshTokens: refreshTokenRevoke});
+
+  // console.log(user.refreshTokens, "found the user")
+
+  if(user){
+    //remove it from db
+
+    user.refreshTokens = user.refreshTokens.filter(t => t !== refreshTokenRevoke) // -> doubt: t creates a new array by including only the values that do not match the refreshTokenToRevoke.
+
+    //.filter() builds a new array without the matching token
+
+    await user.save();
+  }
+
+  // Don't expose info: always return 204 No Content
+
+  res.sendStatus(204);
+
+  //Whether or not the token exists in the DB, you never expose any internal logic.
+
+  //You don’t tell the client “this token doesn’t exist” — because that could leak information.
+})
+
+
 
 // @route   GET /protected
 // @desc    Access protected route with token
