@@ -220,13 +220,3 @@ curl -X POST http://localhost:3000/api/logout \
 ```
 
 ---
-
-## Next Steps
-
-* **Role-Based Access Control (RBAC)**
-* **OAuth2 / Social Login**
-* **Two-Factor Authentication (2FA)**
-* **Rate Limiting & Security Hardening**
-* **Interview Q\&A & Code Exercises**
-
-Feel free to open issues or submit pull requests as you enhance this boilerplate.
